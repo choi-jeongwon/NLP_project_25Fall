@@ -6,6 +6,8 @@ df_sample.csv
 
 code_arxiv_NLP.ipynb
 
+dictionary/elp_database.csv
+
 References/
 
 
@@ -18,5 +20,8 @@ References/
    code_arxiv_NLP.ipynb contains the full workflow (data cleaning, sampling, and analysis).
    * Notes: Originally run in Google Colab. If running locally, update file paths as needed.
 
-3. References
+3. Dictionary
+   used elp_database.csv as dictionary
+   
+4. References
    References folder PDFs of papers cited in the paper.
