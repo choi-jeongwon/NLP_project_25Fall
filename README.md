@@ -2,11 +2,8 @@ Code, data, and references used for the 2025 Fall NLP project:
 Comparing Language Use Across Academic Disciplines Using arXiv Preprints
 
 ----Repository Structure---
-
-Dataset/
 df_sample.csv
 
-Code/
 code_arxiv_NLP.ipynb
 
 References/
@@ -18,7 +15,7 @@ References/
    * Raw data source: Kaggle “Papers by subject” dataset (arplusman): https://www.kaggle.com/datasets/arplusman/papers-by-subject
 
 2. Code
-   code/code_arxiv_NLP.ipynb contains the full workflow (data cleaning, sampling, and analysis).
+   code_arxiv_NLP.ipynb contains the full workflow (data cleaning, sampling, and analysis).
    * Notes: Originally run in Google Colab. If running locally, update file paths as needed.
 
 3. References
