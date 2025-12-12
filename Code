@@ -13,10 +13,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-
+from sklearn.model_selection import StratifiedKFold, cross_val_predict
+from sklearn import metrics
 
 RANDOM_STATE = 42
-N_PER_DISCIPLINE = 200
+N_PER_DISCIPLINE = 1000
 CATEGORIES_TO_KEEP = ["cs", "math", "physics", "q-bio", "cond"]
 
 # Paths (edit to match your repo)
@@ -242,46 +243,26 @@ def make_spacy_tokenizer(nlp):
 out_clf = OUT_DIR / "tfidf_logreg"
 out_clf.mkdir(parents=True, exist_ok=True)
 
-X_text = df_sample["Summary"].fillna("").astype(str).tolist()
-y = df_sample[cat_col].astype(str).values
 
-vectorizer = TfidfVectorizer(
-    tokenizer=make_spacy_tokenizer(nlp),
-    min_df=5,
-    max_df=0.5,
-    lowercase=False,
-    token_pattern=None,
-)
+# Prepare data
+X = tfidf_df.drop('Category', axis=1)
+y = tfidf_df['Category']
 
-X = vectorizer.fit_transform(X_text)
+# 10-fold stratified CV
+cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+clf = LogisticRegression(max_iter=1000)
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
-)
+# Cross-validated predictions for each sample
+y_pred = cross_val_predict(clf, X, y, cv=cv, n_jobs=-1)
 
-clf = LogisticRegression(max_iter=2000)
-clf.fit(X_train, y_train)
+# Evaluation
+print(f"10-fold CV Accuracy: {metrics.accuracy_score(y, y_pred):.4f}")
+print("\n10-fold CV Classification Report:\n", metrics.classification_report(y, y_pred))
 
-pred = clf.predict(X_test)
+# Confusion matrix
+cm = metrics.confusion_matrix(y, y_pred, labels=np.unique(y))
+print("\nConfusion Matrix:\n", cm)
 
-acc = accuracy_score(y_test, pred)
-report = classification_report(y_test, pred, digits=3)
-(out_clf / "classification_report.txt").write_text(
-    f"accuracy: {acc:.4f}\n\n{report}\n", encoding="utf-8"
-)
-
-# Confusion matrix (saved as image, no seaborn)
-cm = confusion_matrix(y_test, pred, labels=clf.classes_)
-plt.figure(figsize=(7, 5))
-plt.imshow(cm, aspect="auto")
-plt.xticks(range(len(clf.classes_)), clf.classes_, rotation=45, ha="right")
-plt.yticks(range(len(clf.classes_)), clf.classes_)
-plt.title("Confusion matrix")
-plt.xlabel("Predicted")
-plt.ylabel("Actual")
-plt.tight_layout()
-plt.savefig(out_clf / "confusion_matrix.png", dpi=300, bbox_inches="tight")
-plt.close()
 
 # Top terms per class
 feature_names = np.array(vectorizer.get_feature_names_out())
