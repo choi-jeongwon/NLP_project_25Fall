@@ -10,7 +10,8 @@ dictionary/elp_database.csv
 
 References/
 * Bafna et al. (2016) – Document clustering TF–IDF approach 
-* Chen et al. (2023) – When text mining meets science mapping in the bibliometric analysis 
+* Chen et al. (2023) – When text mining meets science mapping in the bibliometric analysis
+* Haggan. (2024) - Research paper titles in literature, linguistics and science: dimensions of attraction 
 * Hong et al. (2025) – Has higher education become more interdisciplinary 
 * Kostoff (2012) – Text mining for science and technology: a review, part I 
 * Kostoff et al. (2001) – Text mining using database tomography and bibliometrics 
