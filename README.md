@@ -9,6 +9,17 @@ code_arxiv_NLP.ipynb
 dictionary/elp_database.csv
 
 References/
+* Bafna et al. (2016) – Document clustering TF–IDF approach 
+* Chen et al. (2023) – When text mining meets science mapping in the bibliometric analysis 
+* Hong et al. (2025) – Has higher education become more interdisciplinary 
+* Kostoff (2012) – Text mining for science and technology: a review, part I 
+* Kostoff et al. (2001) – Text mining using database tomography and bibliometrics 
+* Lucy et al. (2023) – Words as Gatekeepers 
+* McCarthy et al. (2008) – Are Three Words All We Need? 
+* McGillivray et al. (2022) – Investigating patterns of change, stability, and interaction among disciplines using embeddings 
+* Rahman et al. (2025) – Automated Research Article Classification and Recommendation Using NLP and ML 
+* Suurmond et al. (2024) – Text mining and network analytics for literature reviews 
+* Whissell (1999) – Linguistic Complexity of Abstracts and Titles in Highly Cited Journals 
 
 
 ----Details----
