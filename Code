@@ -1,0 +1,298 @@
+# ============================================================
+# 0) Imports + settings
+# ============================================================
+from pathlib import Path
+import re
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy import stats
+
+import spacy
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+
+RANDOM_STATE = 42
+N_PER_DISCIPLINE = 200
+CATEGORIES_TO_KEEP = ["cs", "math", "physics", "q-bio", "cond"]
+
+# Paths (edit to match your repo)
+ROOT = Path(".")
+DATA_DIR = ROOT / "data"
+RAW_DIR = DATA_DIR / "raw"
+EXT_DIR = DATA_DIR / "external"
+PROCESSED_DIR = DATA_DIR / "processed"
+OUT_DIR = ROOT / "outputs"
+
+ARXIV_CSV = RAW_DIR / "arXiv-DataFrame.csv"
+ELP_CSV = EXT_DIR / "elp_database.csv" 
+PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# ============================================================
+# 1) Helper functions (general)
+# ============================================================
+def safe_divide(a, b):
+    return a / b if b else 0.0
+
+def to_float(x):
+    if x is None:
+        return np.nan
+    if isinstance(x, str) and x.strip().lower() in {"", "na", "nan"}:
+        return np.nan
+    try:
+        return float(x)
+    except Exception:
+        return np.nan
+
+def mean_ignore_na(seq, fallback=0.0):
+    arr = np.array(seq, dtype=float)
+    m = np.nanmean(arr)
+    return float(m) if np.isfinite(m) else fallback
+
+def eta_squared(groups):
+    all_vals = np.concatenate(groups)
+    grand = np.nanmean(all_vals)
+    ss_total = np.nansum((all_vals - grand) ** 2)
+    ss_between = sum(g.size * (np.nanmean(g) - grand)
+    return (ss_between / ss_total) if ss_total > 0 else np.nan
+
+# ============================================================
+# 2) Load spaCy model
+# ============================================================
+# Run once in your environment:
+# python -m spacy download en_core_web_sm
+nlp = spacy.load("en_core_web_sm", disable=["ner"])
+
+# ============================================================
+# 3) Load arXiv data + clean category labels
+# ============================================================
+def clean_category(category: str):
+    """
+    - q-bio.NC -> q-bio.NC (keep up to first period)
+    - cs.AI -> cs
+    - math.PR -> math
+    """
+    if not isinstance(category, str):
+        return category
+    if category.startswith("q-"):
+        parts = re.split(r"[.-]", category, maxsplit=2)
+        if len(parts) > 1:
+            delimiter = category[len(parts[0])]
+            return f"{parts[0]}{delimiter}{parts[1]}"
+        return parts[0]
+    m = re.match(r"^([a-zA-Z]+)", category)
+    return m.group(1) if m else category
+
+df = pd.read_csv(ARXIV_CSV, usecols=["Title", "Summary", "Primary Category"]).copy()
+df = df.dropna(subset=["Title", "Summary", "Primary Category"]).copy()
+df["Cleaned_Primary_Category"] = df["Primary Category"].apply(clean_category)
+
+# Filter to selected disciplines
+df_filtered = df[df["Cleaned_Primary_Category"].isin(CATEGORIES_TO_KEEP)].copy()
+
+# Sample balanced dataset
+df_sample = (
+    df_filtered.groupby("Cleaned_Primary_Category", group_keys=False)
+    .apply(lambda x: x.sample(n=N_PER_DISCIPLINE, random_state=RANDOM_STATE))
+    .reset_index(drop=True)
+)
+df_sample.insert(0, "paper_id", np.arange(1, len(df_sample) + 1))
+df_sample = df_sample[["paper_id", "Title", "Summary", "Cleaned_Primary_Category"]]
+
+df_sample.to_csv(PROCESSED_DIR / "df_sample.csv", index=False, encoding="utf-8")
+
+# ============================================================
+# 4) Load ELP lexicon dictionary
+# ============================================================
+elp_df = pd.read_csv(ELP_CSV, index_col=0)
+elp_df = elp_df[elp_df.index.notnull()]
+elp_df.index = elp_df.index.astype(str)
+
+# dict: word -> list of ELP columns (as in your original approach)
+elp_dict = {k.lower(): v for k, v in elp_df.T.to_dict("list").items()}
+
+# ============================================================
+# 5) Lexicon + POS features for Title/Summary
+# ============================================================
+TARGET_POS = ("NOUN", "VERB", "ADJ", "ADV")
+
+def get_text_properties(text_series, nlp, elp_dict):
+    docs = list(nlp.pipe(text_series.fillna("").astype(str), batch_size=50))
+
+    all_nw, all_conc, all_freq = [], [], []
+    all_pos_props = {p: [] for p in TARGET_POS}
+
+    for doc in docs:
+        alpha_count = 0
+        pos_counts = {p: 0 for p in TARGET_POS}
+        hal_vals, conc_vals = [], []
+
+        for tok in doc:
+            if not tok.is_alpha:
+                continue
+            alpha_count += 1
+
+            if tok.pos_ in pos_counts:
+                pos_counts[tok.pos_] += 1
+
+            v = elp_dict.get(tok.lower_)
+            if v is not None:
+                hv = to_float(v[1] if len(v) > 1 else None)     # HAL freq index
+                cv = to_float(v[25] if len(v) > 25 else None)   # concreteness index
+                hal_vals.append(hv)
+                conc_vals.append(cv)
+
+        all_nw.append(alpha_count)
+        all_conc.append(mean_ignore_na(conc_vals, fallback=0.0))
+        all_freq.append(mean_ignore_na(hal_vals, fallback=0.0))
+
+        for p in TARGET_POS:
+            all_pos_props[p].append(safe_divide(pos_counts[p], alpha_count))
+
+    return all_nw, all_conc, all_freq, all_pos_props
+
+# Title
+title_nw, title_conc, title_freq, title_pos = get_text_properties(df_sample["Title"], nlp, elp_dict)
+df_sample["title_NW"] = title_nw
+df_sample["title_concreteness"] = title_conc
+df_sample["title_hal_freq"] = title_freq
+for p, v in title_pos.items():
+    df_sample[f"title_{p}_prop"] = v
+
+# Summary
+sum_nw, sum_conc, sum_freq, sum_pos = get_text_properties(df_sample["Summary"], nlp, elp_dict)
+df_sample["summary_NW"] = sum_nw
+df_sample["summary_concreteness"] = sum_conc
+df_sample["summary_hal_freq"] = sum_freq
+for p, v in sum_pos.items():
+    df_sample[f"summary_{p}_prop"] = v
+
+df_sample.to_csv(PROCESSED_DIR / "df_features.csv", index=False, encoding="utf-8")
+
+# ============================================================
+# 6) Group summaries + ANOVA/Kruskal + mean bar plots
+# ============================================================
+cat_col = "Cleaned_Primary_Category"
+measures = [
+    "title_NW","title_concreteness","title_hal_freq",
+    "summary_NW","summary_concreteness","summary_hal_freq",
+    "title_NOUN_prop","title_VERB_prop","title_ADJ_prop","title_ADV_prop",
+    "summary_NOUN_prop","summary_VERB_prop","summary_ADJ_prop","summary_ADV_prop",
+]
+measures = [m for m in measures if m in df_sample.columns]
+
+out_stats = OUT_DIR / "tables_and_plots"
+out_figs = out_stats / "figures"
+out_stats.mkdir(parents=True, exist_ok=True)
+out_figs.mkdir(parents=True, exist_ok=True)
+
+mean_table = df_sample.groupby(cat_col)[measures].mean(numeric_only=True).sort_index()
+count_table = df_sample.groupby(cat_col).size().rename("n")
+summary_table = mean_table.copy()
+summary_table.insert(0, "n", count_table)
+
+summary_table.to_csv(out_stats / "summary_means_by_category.csv")
+
+# ANOVA + Kruskal + eta^2
+cats = sorted(df_sample[cat_col].dropna().unique().tolist())
+test_rows = []
+for m in measures:
+    groups = [df_sample.loc[df_sample[cat_col] == c, m].astype(float).dropna().values for c in cats]
+    groups = [g for g in groups if g.size > 1]
+    if len(groups) < 2:
+        test_rows.append([m, np.nan, np.nan, np.nan, np.nan, np.nan])
+        continue
+    F, pA = stats.f_oneway(*groups)
+    H, pK = stats.kruskal(*groups)
+    e2 = eta_squared(groups)
+    test_rows.append([m, F, pA, e2, H, pK])
+
+tests = pd.DataFrame(test_rows, columns=["measure", "anova_F", "anova_p", "eta2", "kruskal_H", "kruskal_p"])
+tests.to_csv(out_stats / "anova_kruskal_tests.csv", index=False)
+
+# Save mean bar plots
+for m in measures:
+    plt.figure()
+    summary_table[m].plot(kind="bar")
+    plt.title(f"Mean of {m} by {cat_col}")
+    plt.ylabel(m)
+    plt.xlabel(cat_col)
+    plt.xticks(rotation=45, ha="right")
+    plt.tight_layout()
+    plt.savefig(out_figs / f"mean_{m}.png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+# ============================================================
+# 7) TF–IDF + multinomial logistic regression classifier
+# ============================================================
+def make_spacy_tokenizer(nlp):
+    def tok(text):
+        doc = nlp(text)
+        return [
+            t.lemma_.lower()
+            for t in doc
+            if t.is_alpha and (not t.is_stop) and (not t.is_punct) and (not t.is_space)
+        ]
+    return tok
+
+out_clf = OUT_DIR / "tfidf_logreg"
+out_clf.mkdir(parents=True, exist_ok=True)
+
+X_text = df_sample["Summary"].fillna("").astype(str).tolist()
+y = df_sample[cat_col].astype(str).values
+
+vectorizer = TfidfVectorizer(
+    tokenizer=make_spacy_tokenizer(nlp),
+    min_df=5,
+    max_df=0.5,
+    lowercase=False,
+    token_pattern=None,
+)
+
+X = vectorizer.fit_transform(X_text)
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
+)
+
+clf = LogisticRegression(max_iter=2000)
+clf.fit(X_train, y_train)
+
+pred = clf.predict(X_test)
+
+acc = accuracy_score(y_test, pred)
+report = classification_report(y_test, pred, digits=3)
+(out_clf / "classification_report.txt").write_text(
+    f"accuracy: {acc:.4f}\n\n{report}\n", encoding="utf-8"
+)
+
+# Confusion matrix (saved as image, no seaborn)
+cm = confusion_matrix(y_test, pred, labels=clf.classes_)
+plt.figure(figsize=(7, 5))
+plt.imshow(cm, aspect="auto")
+plt.xticks(range(len(clf.classes_)), clf.classes_, rotation=45, ha="right")
+plt.yticks(range(len(clf.classes_)), clf.classes_)
+plt.title("Confusion matrix")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.tight_layout()
+plt.savefig(out_clf / "confusion_matrix.png", dpi=300, bbox_inches="tight")
+plt.close()
+
+# Top terms per class
+feature_names = np.array(vectorizer.get_feature_names_out())
+lines = []
+for i, label in enumerate(clf.classes_):
+    coefs = clf.coef_[i]
+    top_idx = np.argsort(coefs)[-10:][::-1]
+    lines.append(f"{label}: {', '.join(feature_names[top_idx])}")
+(out_clf / "top_terms_by_class.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+print("Done.")
+print(f"- processed: {PROCESSED_DIR / 'df_sample.csv'}")
+print(f"- features:  {PROCESSED_DIR / 'df_features.csv'}")
+print(f"- outputs:   {OUT_DIR}")
