@@ -259,10 +259,18 @@ y_pred = cross_val_predict(clf, X, y, cv=cv, n_jobs=-1)
 print(f"10-fold CV Accuracy: {metrics.accuracy_score(y, y_pred):.4f}")
 print("\n10-fold CV Classification Report:\n", metrics.classification_report(y, y_pred))
 
-# Confusion matrix
-cm = metrics.confusion_matrix(y, y_pred, labels=np.unique(y))
-print("\nConfusion Matrix:\n", cm)
+# Confusion Matrix (10-fold CV predictions: y_pred vs y)
+labels = np.unique(y)
+cm = metrics.confusion_matrix(y, y_pred, labels=labels)
 
+plt.figure(figsize=(7, 5))
+sns.heatmap(cm, annot=True, fmt='d', xticklabels=labels, yticklabels=labels)
+plt.title('Confusion Matrix (10-fold CV)')
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.tight_layout()
+plt.savefig('confusion_matrix.png', dpi=300)
+plt.show()
 
 # Top terms per class
 feature_names = np.array(vectorizer.get_feature_names_out())
